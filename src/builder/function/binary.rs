@@ -1,4 +1,4 @@
-use inkwell::values::{AnyValue, InstructionValue, IntValue};
+use inkwell::values::{AnyValue, BasicValueEnum, InstructionValue, IntValue};
 
 use super::CairoFunctionBuilder;
 use crate::builder::get_name;
@@ -13,7 +13,7 @@ impl<'ctx> CairoFunctionBuilder<'ctx> {
                     .last()
                     .unwrap()
                     // Sanity check
-                    .parse::<u128>()
+                    .parse::<i128>()
                     .expect("Rust doesn't handle numbers bigger than u128");
         // Then get the type
         let ty = val.get_type().print_to_string().to_string();
@@ -23,7 +23,12 @@ impl<'ctx> CairoFunctionBuilder<'ctx> {
     }
     /// Translates an LLVM binary operation to cairo. This can be anything that expects exactly 1
     /// operator with a left and right operand.
-    pub fn process_binary_int_op(&mut self, instruction: &InstructionValue<'ctx>, operator: &str) -> String {
+    pub fn process_binary_int_op(
+        &mut self,
+        instruction: &InstructionValue<'ctx>,
+        operator: &str,
+        is_loop: bool,
+    ) -> String {
         // Get th left operand.
         let left = unsafe {
             instruction
@@ -41,7 +46,14 @@ impl<'ctx> CairoFunctionBuilder<'ctx> {
                 .expect("right operand of add should be a basic value")
         };
         // Get the name of the variable we want to store the result of the operantion in.
-        let instr_name = get_name(instruction.get_name().unwrap_or_default()).unwrap_or("result".to_owned());
+
+        let instr_name = {
+            let basic_val: BasicValueEnum = instruction.as_any_value_enum().try_into().unwrap();
+            self.variables
+                .get(&basic_val)
+                .cloned()
+                .unwrap_or_else(|| get_name(instruction.get_name().unwrap_or_default()).unwrap_or("result".to_owned()))
+        };
         if let Ok(basic_value_enum) = instruction.as_any_value_enum().try_into() {
             // Save the result variable in our mapping to be able to use later.
             self.variables.insert(basic_value_enum, instr_name.clone());
@@ -49,14 +61,14 @@ impl<'ctx> CairoFunctionBuilder<'ctx> {
 
         // The operand is either a variable or a constant so either we get it from our mapping or it's
         // unnamed and it's a const literal.
-        let left_name = self.variables.get(&left).cloned().unwrap_or_else(|| {
-            if right.into_int_value().is_const() {
+        let left_name = get_name(left.get_name()).unwrap_or_else(|| {
+            if left.into_int_value().is_const() {
                 Self::extract_const_int_value(left.into_int_value())
             } else {
                 unreachable!("Left operand should either be a variable or a constant")
             }
         });
-        let right_name = self.variables.get(&right).cloned().unwrap_or_else(|| {
+        let right_name = get_name(right.get_name()).unwrap_or_else(|| {
             if right.into_int_value().is_const() {
                 Self::extract_const_int_value(right.into_int_value())
             } else {
@@ -64,6 +76,6 @@ impl<'ctx> CairoFunctionBuilder<'ctx> {
             }
         });
 
-        format!("let {} = {} {} {};", instr_name, left_name, operator, right_name)
+        format!("{}{} = {} {} {};", if is_loop { "" } else { "let " }, instr_name, left_name, operator, right_name)
     }
 }

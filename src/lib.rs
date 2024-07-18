@@ -32,7 +32,7 @@ mod tests {
 
     #[test]
     fn it_compiles() {
-        println!("Cairo code:\n{}", compile("examples/increment/increment.ll"));
+        println!("Cairo code:\n{}", compile("examples/fib/fib.ll"));
     }
 
     #[test]
@@ -66,6 +66,32 @@ mod tests {
         let expected_name = "increment".to_owned();
         let expected_return_type = "i128".to_owned();
         let expected_params = vec![CairoParameter::new("left".to_owned(), "i128".to_owned())];
+        let code = compile("examples/increment/increment.ll");
+
+        // Check number of functions generated
+        assert_eq!(code.count_functions(), 1, "Add function should generate exactly 1 function");
+        let function = code.functions().first().unwrap();
+        // Check function signature
+        assert_eq!(
+            function.signature,
+            CairoFunctionSignature::new(expected_name, expected_params, expected_return_type)
+        );
+
+        // Check function body
+        assert_eq!(
+            function.body,
+            CairoFunctionBody::new(vec![
+                "let _0 = left + 170141183460469231731687303715884105727_i128;".to_owned(),
+                "return _0;".to_owned()
+            ])
+        );
+    }
+
+    #[test]
+    fn test_fib() {
+        let expected_name = "fib".to_owned();
+        let expected_return_type = "i64".to_owned();
+        let expected_params = vec![CairoParameter::new("left".to_owned(), "i64".to_owned())];
         let code = compile("examples/increment/increment.ll");
 
         // Check number of functions generated
