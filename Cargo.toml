@@ -6,3 +6,6 @@ edition = "2021"
 [dependencies]
 inkwell = {git = "https://github.com/TheDan64/inkwell", features = ["llvm18-0"]}
 petgraph = "0.6.5"
+
+[dev-dependencies]
+pretty_assertions = "1.4.0"

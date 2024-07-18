@@ -1,11 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
 use std::ffi::CStr;
 use std::fmt::Display;
 
 use function::{CairoFunction, CairoFunctionBuilder};
-use inkwell::values::{AnyValue, AsValueRef, BasicValueEnum, FunctionValue, InstructionOpcode, PhiValue};
+use inkwell::values::{FunctionValue, InstructionOpcode};
 use inkwell::IntPredicate;
-use petgraph::algo::{has_path_connecting, tarjan_scc};
 
 pub mod function;
 

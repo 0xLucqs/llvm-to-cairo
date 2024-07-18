@@ -90,9 +90,13 @@ mod tests {
     #[test]
     fn test_fib() {
         let expected_name = "fib".to_owned();
-        let expected_return_type = "i64".to_owned();
-        let expected_params = vec![CairoParameter::new("left".to_owned(), "i64".to_owned())];
-        let code = compile("examples/increment/increment.ll");
+        let expected_return_type = "i32".to_owned();
+        let expected_params = vec![
+            CairoParameter::new("a".to_owned(), "i32".to_owned()),
+            CairoParameter::new("b".to_owned(), "i32".to_owned()),
+            CairoParameter::new("n".to_owned(), "i32".to_owned()),
+        ];
+        let code = compile("examples/fib/fib.ll");
 
         // Check number of functions generated
         assert_eq!(code.count_functions(), 1, "Add function should generate exactly 1 function");
@@ -104,12 +108,46 @@ mod tests {
         );
 
         // Check function body
-        assert_eq!(
+        pretty_assertions::assert_eq!(
             function.body,
             CairoFunctionBody::new(vec![
-                "let _0 = left + 170141183460469231731687303715884105727_i128;".to_owned(),
-                "return _0;".to_owned()
-            ])
+                "let mut is_from_bb2 = false;".to_owned(),
+                "let mut is_from_start = false;".to_owned(),
+                "let result = n == 0_i32;".to_owned(),
+                "".to_owned(),
+                "is_from_bb2 = false;".to_owned(),
+                "is_from_start = true;".to_owned(),
+                "let mut ntr3 = 0_i32;".to_owned(),
+                "let mut btr2 = 0_i32;".to_owned(),
+                "let mut atr1 = 0_i32;".to_owned(),
+                "let mut _4 = 0_i32;".to_owned(),
+                "let mut _5 = 0_i32;".to_owned(),
+                "let mut var9 = false;".to_owned(),
+                "if !result {".to_owned(),
+                "loop {".to_owned(),
+                "ntr3 = if is_from_bb2 { _5 } else if is_from_start { n } else { panic!(\"There is a bug in the \
+                 compiler please report it\")};"
+                    .to_owned(),
+                "btr2 = if is_from_bb2 { _4 } else if is_from_start { b } else { panic!(\"There is a bug in the \
+                 compiler please report it\")};"
+                    .to_owned(),
+                "atr1 = if is_from_bb2 { btr2 } else if is_from_start { a } else { panic!(\"There is a bug in the \
+                 compiler please report it\")};"
+                    .to_owned(),
+                "_4 = btr2 + atr1;".to_owned(),
+                "_5 = ntr3 + -1_i32;".to_owned(),
+                "var9 = _5 == 0_i32;".to_owned(),
+                "if var9\n{break;}".to_owned(),
+                "is_from_bb2 = true;".to_owned(),
+                "is_from_start = false;".to_owned(),
+                "};".to_owned(),
+                "let mut atrlcssa = 0_i32;".to_owned(),
+                "}".to_owned(),
+                "let atrlcssa = if is_from_start { a } else if is_from_bb2 { btr2 } else { panic!(\"There is a bug in \
+                 the compiler please report it\")};"
+                    .to_owned(),
+                "return btr2;".to_owned()
+            ]),
         );
     }
 }
