@@ -1,12 +1,29 @@
-use inkwell::values::{AnyValue, InstructionValue};
+use inkwell::values::{AnyValue, InstructionValue, IntValue};
 
 use super::CairoFunctionBuilder;
 use crate::builder::get_name;
 
 impl<'ctx> CairoFunctionBuilder<'ctx> {
+    fn extract_const_int_value(val: IntValue) -> String {
+        // An llvm int constant is represented like this <type> <value> ex: i128 1234
+        // First we get the value by getting the last chunk of its string representation
+        let const_val = val.print_to_string()
+                    .to_string()
+                    .split_whitespace()
+                    .last()
+                    .unwrap()
+                    // Sanity check
+                    .parse::<u128>()
+                    .expect("Rust doesn't handle numbers bigger than u128");
+        // Then get the type
+        let ty = val.get_type().print_to_string().to_string();
+        // Format it cairo style.
+        // We add the type to have more type safety and detect bugs.
+        format!("{const_val}_{ty}")
+    }
     /// Translates an LLVM binary operation to cairo. This can be anything that expects exactly 1
     /// operator with a left and right operand.
-    pub fn process_binary_op(&mut self, instruction: &InstructionValue<'ctx>, operator: &str) -> String {
+    pub fn process_binary_int_op(&mut self, instruction: &InstructionValue<'ctx>, operator: &str) -> String {
         // Get th left operand.
         let left = unsafe {
             instruction
@@ -29,18 +46,23 @@ impl<'ctx> CairoFunctionBuilder<'ctx> {
             // Save the result variable in our mapping to be able to use later.
             self.variables.insert(basic_value_enum, instr_name.clone());
         }
+
         // The operand is either a variable or a constant so either we get it from our mapping or it's
-        // unnamed as it's translated into a literal.
-        let left_name = self
-            .variables
-            .get(&left)
-            .cloned()
-            .unwrap_or_else(|| get_name(left.get_name()).unwrap_or("left".to_owned()));
-        let right_name = self
-            .variables
-            .get(&right)
-            .cloned()
-            .unwrap_or_else(|| get_name(right.get_name()).unwrap_or("right".to_owned()));
+        // unnamed and it's a const literal.
+        let left_name = self.variables.get(&left).cloned().unwrap_or_else(|| {
+            if right.into_int_value().is_const() {
+                Self::extract_const_int_value(left.into_int_value())
+            } else {
+                unreachable!("Left operand should either be a variable or a constant")
+            }
+        });
+        let right_name = self.variables.get(&right).cloned().unwrap_or_else(|| {
+            if right.into_int_value().is_const() {
+                Self::extract_const_int_value(right.into_int_value())
+            } else {
+                unreachable!("Right should either be a variable or a constant")
+            }
+        });
 
         format!("let {} = {} {} {};", instr_name, left_name, operator, right_name)
     }

@@ -17,6 +17,15 @@ pub struct CairoBuilder<'ctx> {
 
 #[derive(Default, Clone, PartialEq, Debug)]
 pub struct CairoFunctions(Vec<CairoFunction>);
+impl CairoFunctions {
+    pub fn functions(&self) -> &[CairoFunction] {
+        &self.0
+    }
+
+    pub fn count_functions(&self) -> usize {
+        self.0.len()
+    }
+}
 
 impl CairoFunctions {
     pub fn push_function(&mut self, function: CairoFunction) {
@@ -51,8 +60,8 @@ impl<'ctx> CairoBuilder<'ctx> {
             for instruction in bb.get_instructions() {
                 // Get the opcode of the instruction
                 let code_line = match instruction.get_opcode() {
-                    InstructionOpcode::Add => function_builder.process_binary_op(&instruction, "+"),
-                    InstructionOpcode::Sub => function_builder.process_binary_op(&instruction, "-"),
+                    InstructionOpcode::Add => function_builder.process_binary_int_op(&instruction, "+"),
+                    InstructionOpcode::Sub => function_builder.process_binary_int_op(&instruction, "-"),
                     InstructionOpcode::Return => function_builder.process_return(&instruction),
                     _ => "".to_owned(),
                 };

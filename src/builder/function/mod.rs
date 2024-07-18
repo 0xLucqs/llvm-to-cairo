@@ -28,6 +28,12 @@ impl Display for CairoFunction {
 pub struct CairoFunctionBody(Vec<String>);
 
 impl CairoFunctionBody {
+    pub fn new(body: Vec<String>) -> Self {
+        Self(body)
+    }
+}
+
+impl CairoFunctionBody {
     pub fn push_line(&mut self, line: String) {
         self.0.push(line)
     }
@@ -47,7 +53,7 @@ pub struct CairoFunctionSignature {
 }
 
 impl CairoFunctionSignature {
-    fn new(name: String, parameters: Vec<CairoParameter>, return_type: String) -> Self {
+    pub fn new(name: String, parameters: Vec<CairoParameter>, return_type: String) -> Self {
         Self { name, parameters: CairoParameters(parameters), return_type }
     }
 }
@@ -71,6 +77,11 @@ impl Display for CairoFunctionSignature {
 pub struct CairoParameter {
     pub(crate) name: String,
     pub(crate) ty: String,
+}
+impl CairoParameter {
+    pub fn new(name: String, ty: String) -> Self {
+        Self { name, ty }
+    }
 }
 
 impl Display for CairoParameter {
