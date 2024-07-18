@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::ffi::CStr;
+use std::fmt::Display;
 
-use function::CairoFunctionBuilder;
+use function::{CairoFunction, CairoFunctionBuilder};
 use inkwell::values::{FunctionValue, InstructionOpcode};
 
 pub mod function;
@@ -10,8 +11,23 @@ pub mod function;
 #[derive(Default)]
 pub struct CairoBuilder<'ctx> {
     /// Cairo functions
-    pub(crate) functions: HashMap<FunctionValue<'ctx>, String>,
-    pub(crate) code: Vec<String>,
+    pub(crate) cairo_fn_from_llvm: HashMap<FunctionValue<'ctx>, String>,
+    pub(crate) functions: CairoFunctions,
+}
+
+#[derive(Default, Clone, PartialEq, Debug)]
+pub struct CairoFunctions(Vec<CairoFunction>);
+
+impl CairoFunctions {
+    pub fn push_function(&mut self, function: CairoFunction) {
+        self.0.push(function)
+    }
+}
+
+impl Display for CairoFunctions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n"))
+    }
 }
 
 fn get_name(name: &CStr) -> Option<String> {
@@ -19,14 +35,13 @@ fn get_name(name: &CStr) -> Option<String> {
 }
 impl<'ctx> CairoBuilder<'ctx> {
     /// Translates an LLVM function to a cairo function and return it as a string.
-    pub fn translate_function(&mut self, func: &FunctionValue) -> String {
+    pub fn translate_function(&mut self, func: &FunctionValue) -> CairoFunction {
         // Create a cairo function builder that will help us to build the function.
         let mut function_builder = CairoFunctionBuilder::default();
         // Start by extracting the signature and translating it to cairo. (All functions will be public the
         // original compiler already checked that there is no illegal call)
-        let fn_sig = function_builder.process_function_signature(func, self.functions.keys().count());
-        // append the function signature in the code vec.
-        function_builder.code.push(fn_sig);
+        function_builder.function.signature =
+            function_builder.process_function_signature(func, self.cairo_fn_from_llvm.keys().count());
         // Iterate over the basic blocks of the function. Each function is composed of one or more basic
         // blocks. Basic blocks have one entry and one exit. If there was no return
         // instruction in the bb you'll need to jump to another bb at the end. For more information
@@ -41,9 +56,9 @@ impl<'ctx> CairoBuilder<'ctx> {
                     InstructionOpcode::Return => function_builder.process_return(&instruction),
                     _ => "".to_owned(),
                 };
-                function_builder.code.push(code_line);
+                function_builder.function.body.push_line(code_line);
             }
         }
-        function_builder.code.join("\n")
+        function_builder.function
     }
 }
