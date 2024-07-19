@@ -7,7 +7,7 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     env:
-      LLVM_SYS_150_PREFIX: /usr/lib/llvm-18
+      LLVM_SYS_180_PREFIX: /usr/lib/llvm-18
     steps:
       - uses: actions/checkout@v3
       - name: add llvm deb repository
@@ -16,9 +16,9 @@ jobs:
           repo: deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main
           repo-name: llvm-repo
           keys-asc: https://apt.llvm.org/llvm-snapshot.gpg.key
-      - name: Install LLVM
-        run: sudo apt-get install libllvm-18-ocaml-dev libllvm18 llvm-18 llvm-18-dev llvm-18-doc llvm-18-examples llvm-18-runtime clang-18 clang-tools-18 clang-18-doc libclang-common-18-dev libclang-18-dev libclang1-18 lld-18 libpolly-18-dev libclang-rt-18-dev libc++-18-dev libc++abi-18-dev
 
+      - name: Install LLVM
+        run: sudo apt-get install libllvm-18-ocaml-dev libllvm18 llvm-18 llvm-18-dev llvm-18-doc llvm-18-examples llvm-18-runtime
       - name: Install toolchain
         run: rustup show
 
