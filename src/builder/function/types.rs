@@ -1,7 +1,6 @@
 use inkwell::values::{FunctionValue, InstructionValue};
 
 use super::{CairoFunctionBuilder, CairoFunctionSignature, CairoParameter};
-use crate::builder::get_name;
 
 impl<'ctx> CairoFunctionBuilder<'ctx> {
     /// Translate the LLVM function signature into a Cairo function signature.
@@ -22,11 +21,11 @@ impl<'ctx> CairoFunctionBuilder<'ctx> {
         fn_id: usize,
     ) -> CairoFunctionSignature {
         // Get the function name and if it's empty call it "function{fn_id}"
-        let name = get_name(function.get_name()).unwrap_or(format!("function{fn_id}"));
+        let name = function.get_name().to_str().map(|val| val.to_string()).unwrap_or(format!("function{fn_id}"));
         let mut parameters = Vec::<CairoParameter>::with_capacity(function.count_params() as usize);
         // Extract each parameter and its type.
-        function.get_param_iter().enumerate().for_each(|(index, param)| {
-            let param_name = get_name(param.get_name()).unwrap_or(index.to_string());
+        function.get_param_iter().for_each(|param| {
+            let param_name = self.get_name(param.get_name());
             let param_type = param.get_type().print_to_string().to_string();
             self.variables.insert(param, param_name.clone());
             parameters.push(CairoParameter { name: param_name, ty: param_type });

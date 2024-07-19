@@ -1,11 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use inkwell::basic_block::BasicBlock;
 use inkwell::values::{AnyValue, AsValueRef, BasicValueEnum, FunctionValue, InstructionOpcode, PhiValue};
 use petgraph::algo::{has_path_connecting, tarjan_scc};
 
 use super::CairoFunctionBuilder;
-use crate::builder::get_name;
 
 impl<'ctx> CairoFunctionBuilder<'ctx> {
     /// Construct a graph of basic blocks and detects loops.  It will detect if bb1 jumps to bb2
@@ -20,6 +19,16 @@ impl<'ctx> CairoFunctionBuilder<'ctx> {
         }
 
         for bblock in function.get_basic_block_iter() {
+            // Those 2 helper variables will help detect if a phi depends on a previous phi because this
+            // amazingly well though language can have blocks like that:
+            // %res1 = phi i128 [ %var1 , %bb2 ], [ %var2, %start ]
+            // %res2 = phi i128 [ %res1, %bb2 ], [ %var3, %start ]
+            // And yes you guessed it it doesn't want the latest value of res1 but the value from the last time
+            // we executed this block. Well done Chris
+            // So we need to detect those to have temp variables to store the new value until we reach the end
+            // of the BB and then we'll update variables that live in a greater scope.
+            let mut bblock_phis_inc: HashSet<BasicValueEnum> = HashSet::default();
+            let mut bblock_phis: HashSet<BasicValueEnum> = HashSet::default();
             for instr in bblock.get_instructions() {
                 match instr.get_opcode() {
                     InstructionOpcode::Br => {
@@ -33,25 +42,42 @@ impl<'ctx> CairoFunctionBuilder<'ctx> {
                         //    stuff
                         // we'd add a link from bb1 to bb2 and from bb1 to bb3
                         let bb_index = *self.node_id_from_name.get(&bblock).unwrap();
-                        if let Some(target) = instr.get_operand(1).unwrap().right() {
-                            let target_index = *self.node_id_from_name.get(&target).unwrap();
-                            self.bb_graph.add_edge(bb_index, target_index, ());
-                        }
-                        if let Some(target) = instr.get_operand(2).unwrap().right() {
-                            let target_index = *self.node_id_from_name.get(&target).unwrap();
-                            self.bb_graph.add_edge(bb_index, target_index, ());
+                        for operand in instr.get_operands().flatten() {
+                            if let Some(target) = operand.right() {
+                                let target_index = *self.node_id_from_name.get(&target).unwrap();
+                                self.bb_graph.add_edge(bb_index, target_index, ());
+                            }
                         }
                     }
                     InstructionOpcode::Phi => {
                         // Get the phis incomming basic blocks because we'll add booleans to track from which block
                         // we're comming from as this doesn't exist in cairo.
-                        let dest1 = unsafe { PhiValue::new(instr.as_value_ref()).get_incoming(0).unwrap().1 };
-                        let dest2 = unsafe { PhiValue::new(instr.as_value_ref()).get_incoming(1).unwrap().1 };
-                        self.phis_bblock.extend([dest1, dest2]);
+                        let inc1 = unsafe { PhiValue::new(instr.as_value_ref()).get_incoming(0).unwrap() };
+                        let inc2 = unsafe { PhiValue::new(instr.as_value_ref()).get_incoming(1).unwrap() };
+                        bblock_phis_inc.extend([inc1.0, inc2.0]);
+                        bblock_phis.insert(unsafe { BasicValueEnum::new(instr.as_value_ref()) });
+
+                        self.phis_bblock.extend([inc1.1, inc2.1]);
                     }
                     _ => (),
                 };
             }
+            // Get the variables that are referenced by a phi in the bb they're declared and add them in the
+            // annoying phi hashmap with a suffix so we can create the correct variable in the previous scope
+            // and update it.
+            bblock_phis.intersection(&bblock_phis_inc).for_each(|annoying_phi| {
+                let phi_name = format!("{}_temp", self.get_name(annoying_phi.get_name()));
+                self.bblock_variables
+                    .entry(bblock)
+                    .and_modify(|hm| {
+                        hm.insert(*annoying_phi, phi_name.clone());
+                    })
+                    .or_insert_with(|| {
+                        let mut nhm = HashMap::new();
+                        nhm.insert(*annoying_phi, phi_name);
+                        nhm
+                    });
+            })
         }
         // Detect the strongly connected components (strongly connected basic blocks == loops)
         self.bb_loop = tarjan_scc(&self.bb_graph)
@@ -91,6 +117,22 @@ impl<'ctx> CairoFunctionBuilder<'ctx> {
         }
     }
 
+    /// If we were in a loop close it. Will also close the scope if we were in an else. Also close
+    /// if this is the return basic block.
+    pub fn close_scopes(&mut self, bb: &BasicBlock<'ctx>, is_else: &bool, is_loop: &bool) {
+        // If we're in an else close it or if we're in the return block close it.
+        // TODO(Lucas): Fix that it's 100% wrong as the return block isn't always the last block.
+        if self.return_block.is_some_and(|bblock| &bblock != bb) && *is_else
+            || self.return_block.is_some_and(|bblock| &bblock == bb)
+        {
+            self.push_body_line("}".to_string());
+        }
+        // If we were in a loop, close it
+        if *is_loop {
+            self.push_body_line("};".to_string());
+        }
+    }
+
     /// Create variables outside of the new scope (if/else/loop) so we can still access the value
     /// when we're out of it or at the next iteration.
     pub fn prepare_new_scopes(&mut self, bb: &BasicBlock<'ctx>, is_else: &bool, is_loop: &bool) {
@@ -107,8 +149,7 @@ impl<'ctx> CairoFunctionBuilder<'ctx> {
                     && instruction.get_opcode() != InstructionOpcode::Return
                 {
                     // Get the variable name, if it's unnamed generate a var{index} string.
-                    let res_name = get_name(instruction.get_name().unwrap())
-                        .unwrap_or_else(|| format!("var{}", self.variables.keys().count()));
+                    let res_name = self.get_name(instruction.get_name().unwrap_or_default());
                     // Get the type of the variable because we'll add it to the definition to get more safety.
                     let ty = instruction.get_type().print_to_string().to_string();
                     // i1 are 1 bit integers meaning that they can only be {0, 1} they represent booleans. LLVM can

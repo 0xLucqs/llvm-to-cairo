@@ -1,12 +1,15 @@
 use std::collections::{HashMap, HashSet};
+use std::ffi::CStr;
 use std::fmt::Display;
 
 use inkwell::basic_block::BasicBlock;
-use inkwell::values::BasicValueEnum;
+use inkwell::values::{BasicValueEnum, InstructionOpcode};
+use inkwell::IntPredicate;
 use petgraph::graph::{DiGraph, NodeIndex};
 
 pub mod binary;
 pub mod branch;
+pub mod extend;
 pub mod phi;
 pub mod preprocessing;
 pub mod types;
@@ -19,6 +22,7 @@ pub struct CairoFunctionBuilder<'ctx> {
     pub(crate) node_id_from_name: HashMap<BasicBlock<'ctx>, NodeIndex<u32>>,
     pub(crate) function: CairoFunction,
     pub(crate) phis_bblock: HashSet<BasicBlock<'ctx>>,
+    pub(crate) bblock_variables: HashMap<BasicBlock<'ctx>, HashMap<BasicValueEnum<'ctx>, String>>,
     pub(crate) if_blocks: HashMap<BasicBlock<'ctx>, BasicValueEnum<'ctx>>,
     pub(crate) else_blocks: HashSet<BasicBlock<'ctx>>,
     pub(crate) return_block: Option<BasicBlock<'ctx>>,
@@ -39,6 +43,73 @@ impl<'ctx> CairoFunctionBuilder<'ctx> {
 
     pub fn push_body_line(&mut self, line: String) {
         self.function.body.push_line(line)
+    }
+    pub fn get_name(&self, name: &CStr) -> String {
+        (!name.is_empty())
+            .then(|| name.to_str().expect("Variable name for binary op should be uft-8").replace('.', "_"))
+            .unwrap_or_else(|| format!("var{}", self.variables.keys().count()))
+    }
+
+    /// Set all the basic block booleans to the correct value. This should be used at the end of a
+    /// basic block before jump to know from which basic block we're coming from at runtime.
+    pub fn set_basic_block_booleans(&mut self, bb: &BasicBlock<'ctx>) {
+        // If we're not in the last basic block set all the booleans to the right value to know what basic
+        // block we were in so we can process the phi instruction can work correctly
+        if self.return_block.is_some_and(|bblock| bblock != *bb) || self.return_block.is_none() {
+            for bblock in self.phis_bblock.iter() {
+                // If we were in this basic block
+                if self.get_name(bblock.get_name()) == self.get_name(bb.get_name()) {
+                    let code_line = format!("is_from_{} = true;", self.get_name(bblock.get_name()),);
+                    self.function.body.push_line(code_line);
+                } else {
+                    // if we were not in this basic block
+                    let code_line = format!("is_from_{} = false;", self.get_name(bblock.get_name()),);
+                    self.function.body.push_line(code_line);
+                }
+            }
+        }
+    }
+    /// Process a basic block and convert it to cairo. It will call itself recursively through the
+    /// [CairoFunctionBuilder::process_branch] function.
+    pub fn process_basic_block(&mut self, bb: &BasicBlock<'ctx>) {
+        // Boolean that let's us know if we need to wrap our basic block translation with a loop { bbcode };
+        let is_loop = self.bb_loop.contains(bb);
+        // Is this block the else clause of an if/else
+        let is_else = self.else_blocks.contains(bb);
+        // TODO(Lucas): in preprocess function declare all the variables that will be in subscopes and then
+        // stop worrying about it + only use is_subscope
+        let _is_subscope = is_loop || is_else || self.if_blocks.contains_key(bb);
+
+        // Prepare for loops/if/else
+        self.prepare_new_scopes(bb, &is_else, &is_loop);
+
+        // Iterate over each instruction of the basic block. 1 instruction == 1 LLVM code line
+        for instruction in bb.get_instructions() {
+            // Get the opcode of the instruction
+            let code_line = match instruction.get_opcode() {
+                InstructionOpcode::Add => self.process_binary_int_op(&instruction, "+", bb),
+                InstructionOpcode::Sub => self.process_binary_int_op(&instruction, "-", bb),
+                InstructionOpcode::Return => self.process_return(&instruction),
+                InstructionOpcode::ICmp => {
+                    // we just matched on ICmp so it will never fail
+                    match instruction.get_icmp_predicate().unwrap() {
+                        IntPredicate::EQ => self.process_binary_int_op(&instruction, "==", bb),
+                        IntPredicate::NE => self.process_binary_int_op(&instruction, "!=", bb),
+                        IntPredicate::ULT => self.process_binary_int_op(&instruction, "<", bb),
+                        _ => "".to_owned(),
+                    }
+                }
+                InstructionOpcode::Br => self.process_branch(&instruction, bb, &is_loop, &is_else),
+                InstructionOpcode::ZExt => self.process_zext(&instruction, &is_loop),
+                InstructionOpcode::Phi => self.process_phi(&instruction, bb),
+                _ => "".to_owned(),
+            };
+            self.push_body_line(code_line);
+            if is_loop && instruction.get_opcode() == InstructionOpcode::Br {
+                self.close_scopes(bb, &is_else, &is_loop);
+            }
+            // Add the line to the function body
+        }
     }
 }
 
